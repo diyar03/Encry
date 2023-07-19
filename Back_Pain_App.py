@@ -12,6 +12,7 @@ import os
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient, __version__
 from flask import Flask, render_template, request
 from azure.storage.blob import BlobServiceClient
+from cryptography.fernet import Fernet
 
 
 app = Flask(__name__)
@@ -22,6 +23,38 @@ app.config['UPLOAD_FOLDER'] = path + '/static/files'
 # Azure Storage Account Configuration
 connection_string = 'DefaultEndpointsProtocol=https;AccountName=trialdr;AccountKey=Gb8FIYDeVm47ls+w+50DYf0ftzRXUB4a513h0GgS7Kbzg5FT+5D14HupgEZHIiG+aIHElGpd+1uN+AStPqd9aQ==;EndpointSuffix=core.windows.net'
 container_name = 'diya'
+
+
+# Generating the Encryption key
+key_file = 'encryption_key.key'
+encryption_key = None
+
+
+def generate_key():
+    global encryption_key
+    encryption_key = Fernet.generate_key()
+    with open(key_file, 'wb') as file:
+        file.write(encryption_key)
+
+
+def load_key():
+    global encryption_key
+    with open(key_file, 'rb') as file:
+        encryption_key = file.read()
+
+
+if not os.path.isfile(key_file):
+    generate_key()
+else:
+    load_key()
+
+# Funtion to encrypt the file
+
+
+def encrypt_file(file_data):
+    fernet = Fernet(encryption_key)
+    encrypted_data = fernet.encrypt(file_data)
+    return encrypted_data
 
 
 @app.route('/', methods=('GET', 'POST'))
@@ -53,7 +86,8 @@ def red_flags_questionnaire(question_number: int = 0):
         question_number = 1
     elif question_number > num_question:
         return redirect(url_for('mobile_msk_questionnaire'))
-    question, answers, more_information = model.get_red_flag_question(question_number)
+    question, answers, more_information = model.get_red_flag_question(
+        question_number)
     return render_template('Red_Flags.html', header_1=header_1, question=question, answers=answers,
                            more_information=more_information, next_question_number=question_number + 1)
 
@@ -100,13 +134,19 @@ def upload_file():
     if file.filename == '':
         return "No file selected"
 
-    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    # Encrypting the file data
+    encrypted_data = encrypt_file(file.read())
+
+    # Saving the file
+    blob_service_client = BlobServiceClient.from_connection_string(
+        connection_string)
     container_client = blob_service_client.get_container_client(container_name)
 
-    blob_client = container_client.get_blob_client(file.filename)
-    blob_client.upload_blob(file)
+    encrypted_filename = secure_filename(file.filename) + '.encrypted'
+    blob_client = container_client.get_blob_client(encrypted_filename)
+    blob_client.upload_blob(encrypted_data)
 
-    return "File uploaded successfully"
+    return "File Encrypted and uploaded successfully"
 
 
 if __name__ == '__main__':
